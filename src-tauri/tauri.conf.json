@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OrbitalView Wallpaper",
+  "version": "0.1.0",
+  "identifier": "com.orbitalview.wallpaper",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "OrbitalView Wallpaper",
+        "width": 1000,
+        "height": 880,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "wix": {
+        "language": "en-US"
+      }
+    }
+  }
+}

@@ -1,0 +1,787 @@
+import { invoke } from "@tauri-apps/api/core";
+
+// ---------- Types that match sources.json ----------
+
+type ImageSource = {
+  id: string;
+  name: string;
+
+  base_path?: string;            // e.g. "GOES18/ABI/FD/GEOCOLOR"
+  image_url?: string;            // legacy/manual fallback, optional
+
+  satellite?: string;
+  sector?: string;
+  product?: string;
+
+  default_refresh_minutes?: number;
+  attribution?: string;
+  region?: string;
+  resolution_hint_high?: string;
+  resolution_hint_low?: string;
+
+  favorite?: boolean;
+};
+
+type SourcesConfig = {
+  version: number;
+  sources: ImageSource[];
+};
+
+// ---------- Globals & helpers ----------
+
+const NOAA_BASE = "https://cdn.star.nesdis.noaa.gov/";
+
+let currentConfig: SourcesConfig | null = null;
+let refreshTimerId: number | null = null;
+let isAutoRefreshing = true; // ON by default
+const REFRESH_STATUS_ID = "refresh-status";
+
+
+function byId<T extends HTMLElement>(id: string): T {
+  const el = document.getElementById(id);
+  if (!el) {
+    throw new Error(`Missing element with id="${id}"`);
+  }
+  return el as T;
+}
+
+function setText(id: string, text: string) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function makeSourceLabel(src: ImageSource): string {
+  const extraParts: string[] = [];
+  if (src.region) extraParts.push(src.region);
+  if (src.resolution_hint_high) extraParts.push(src.resolution_hint_high);
+
+  return extraParts.length > 0
+    ? `${src.name} (${extraParts.join(" • ")})`
+    : src.name;
+}
+
+function getSelectedSource(): ImageSource | undefined {
+  if (!currentConfig) return;
+  const select = document.getElementById("source") as HTMLSelectElement | null;
+  if (!select) return;
+  return currentConfig.sources.find((s) => s.id === select.value);
+}
+
+function getResolutionSelection(): "high" | "low" {
+  const checked = document.querySelector<HTMLInputElement>(
+    'input[name="resolution"]:checked',
+  );
+  return checked?.value === "low" ? "low" : "high";
+}
+
+function isLikelyHttpUrl(input: string): boolean {
+  return /^https?:\/\//i.test(input.trim());
+}
+
+function normalizeFileUrlToPath(input: string): string {
+  const s = input.trim();
+  if (s.toLowerCase().startsWith("file:///")) {
+    // Strip scheme and convert slashes to backslashes
+    const withoutScheme = s.slice("file:///".length);
+    return withoutScheme.replace(/\//g, "\\");
+  }
+  return s;
+}
+
+function buildPreviewUrl(src: ImageSource): string {
+  // Preview always uses thumbnail when base_path is available
+  if (src.base_path) {
+    return `${NOAA_BASE}${src.base_path}/thumbnail.jpg`;
+  }
+  // Fallback: if only image_url exists, use that
+  if (src.image_url) {
+    return src.image_url;
+  }
+  throw new Error(`Source "${src.id}" has neither base_path nor image_url`);
+}
+
+function buildWallpaperUrl(src: ImageSource, quality: "high" | "low"): string {
+  if (src.base_path) {
+    if (quality === "high") {
+      // High-res → latest.jpg
+      return `${NOAA_BASE}${src.base_path}/latest.jpg`;
+    } else {
+      // Low-res → thumbnail.jpg
+      return `${NOAA_BASE}${src.base_path}/thumbnail.jpg`;
+    }
+  }
+
+  // Fallback for legacy entries that only specify image_url
+  if (src.image_url) {
+    return src.image_url;
+  }
+
+  throw new Error(`Source "${src.id}" has neither base_path nor image_url`);
+}
+
+async function tagSourceFreshness(src: ImageSource) {
+  const select = document.getElementById("source") as HTMLSelectElement | null;
+  if (!select) return;
+
+  const opt = select.querySelector(
+    `option[value="${src.id}"]`,
+  ) as HTMLOptionElement | null;
+  if (!opt) return;
+
+  const baseLabel =
+    (opt as any).dataset.label || opt.textContent || src.name || src.id;
+
+  // Decide which URL to test for freshness:
+  // use the high-res one (latest.jpg) as the canonical "age"
+  let testUrl: string;
+  try {
+    testUrl = buildWallpaperUrl(src, "high");
+  } catch {
+    // If something is wrong with the config, mark as unknown and bail
+    opt.textContent = `❔ ${baseLabel}`;
+    // color isn't super reliable on <option>, but we can set it
+    opt.style.color = "";
+    return;
+  }
+
+  let symbol = "🟡";
+  let color = "";
+
+  try {
+    const resp = await fetch(testUrl, { method: "HEAD" });
+
+    if (!resp.ok) {
+      symbol = "🔴";
+    } else {
+      const lastModified = resp.headers.get("Last-Modified");
+      if (!lastModified) {
+        symbol = "🔴";
+      } else {
+        const lmDate = new Date(lastModified);
+        if (isNaN(lmDate.getTime())) {
+          symbol = "🔴";
+        } else {
+          const ageHours =
+            (Date.now() - lmDate.getTime()) / (1000 * 60 * 60);
+
+          if (ageHours > 12) {
+            symbol = "🔴";   // stale
+          } else {
+            symbol = "🟢";   // fresh
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Failed to check freshness for", src.id, e);
+    symbol = "🟡";
+  }
+
+  // Update option text and (best-effort) color
+  opt.textContent = `${symbol} ${baseLabel}`;
+  opt.style.color = color;
+}
+
+type AreaId = "west" | "east" | "solar";
+type CoverageId = "global" | "continental" | "regional";
+
+const AREA_LABELS: Record<AreaId, string> = {
+  west: "Western side (Pacific / Alaska / Hawaii / Western Americas)",
+  east: "Eastern side (Atlantic / Caribbean / Eastern Americas)",
+  solar: "Sun (solar imagery)",
+};
+
+const COVERAGE_LABELS: Record<CoverageId, string> = {
+  global: "Full Disk (whole hemisphere)",
+  continental: "U.S. & nearby",
+  regional: "Regional views",
+};
+
+// area -> coverage -> list of sources
+let groupedSources: Record<AreaId, Record<CoverageId, ImageSource[]>> = {
+  west: { global: [], continental: [], regional: [] },
+  east: { global: [], continental: [], regional: [] },
+  solar: { global: [], continental: [], regional: [] },
+};
+
+function classifyArea(src: ImageSource): AreaId {
+  const name = (src.name || "").toLowerCase();
+  const region = (src.region || "").toLowerCase();
+  const product = (src.product || "").toLowerCase();
+  const basePath = (src.base_path || "").toLowerCase();
+
+  // Heuristics for solar imagery:
+  // - base_path includes "/suvi/"
+  // - or product mentions "suvi"
+  // - or name/region mentions "sun" or "solar"
+  const looksSolar =
+    basePath.includes("/suvi/") ||
+    product.includes("suvi") ||
+    name.includes("sun") ||
+    name.includes("solar") ||
+    region.includes("sun") ||
+    region.includes("solar");
+
+  if (looksSolar) return "solar";
+
+  // Otherwise fall back to satellite-based West/East
+  const sat = (src.satellite || "").toUpperCase();
+  if (sat.includes("18")) return "west";
+  if (sat.includes("19")) return "east";
+
+  // Unknown → default to east
+  return "east";
+}
+
+function classifyCoverage(src: ImageSource): CoverageId {
+  const sector = (src.sector || "").toUpperCase();
+  const region = (src.region || "").toLowerCase();
+
+  if (sector === "FD") {
+    return "global";
+  }
+
+  if (
+    sector === "CONUS" ||
+    region.includes("conus") ||
+    region.includes("u.s.") ||
+    region.includes(" us ") ||
+    region.includes("america")
+  ) {
+    return "continental";
+  }
+
+  return "regional";
+}
+
+function groupSourcesForSelector(sources: ImageSource[]) {
+  // reset
+  groupedSources = {
+    west: { global: [], continental: [], regional: [] },
+    east: { global: [], continental: [], regional: [] },
+    solar: { global: [], continental: [], regional: [] },
+  };
+
+  for (const src of sources) {
+    const area = classifyArea(src);
+    const cov = classifyCoverage(src);
+    groupedSources[area][cov].push(src);
+  }
+
+  // Optional: sort regions alphabetically by name for nicer UI
+  (["west", "east", "solar"] as AreaId[]).forEach((area) => {
+    (["global", "continental", "regional"] as CoverageId[]).forEach((cov) => {
+      groupedSources[area][cov].sort((a, b) =>
+        (a.region || a.name).localeCompare(b.region || b.name),
+      );
+    });
+  });
+}
+
+// ---------- Config loading ----------
+
+async function loadSourcesConfig() {
+  try {
+    const cfg = await invoke<SourcesConfig>("get_sources_config");
+    currentConfig = cfg;
+
+    // Multi-step selector should see ALL sources
+    groupSourcesForSelector(cfg.sources);
+
+    // Build favorites list for the main dropdown
+    const allSources = cfg.sources;
+    const favorites = allSources.filter((s) => s.favorite);
+    const dropdownSources = favorites.length ? favorites : allSources;
+
+    const select = byId<HTMLSelectElement>("source");
+    select.innerHTML = "";
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    placeholder.textContent = "Select source...";
+    select.appendChild(placeholder);
+
+    // Populate dropdown with favorites (or all, if none marked favorite)
+    for (const src of dropdownSources) {
+      const opt = document.createElement("option");
+      opt.value = src.id;
+
+      const baseLabel = makeSourceLabel(src);
+      opt.textContent = baseLabel;
+      (opt as any).dataset.label = baseLabel; // remember bare label for later
+
+      select.appendChild(opt);
+
+      // Kick off async freshness tagging for this source (fire-and-forget)
+      tagSourceFreshness(src).catch((e) =>
+        console.error("Failed to tag source freshness", src.id, e),
+      );
+    }
+  } catch (e) {
+    console.error("Failed to load sources config", e);
+    setText("download-status", "Failed to load sources config. Check config file.");
+  }
+}
+
+
+
+async function updateImageFreshness(url: string) {
+  const ageDiv = document.getElementById("image-age") as HTMLDivElement | null;
+  if (!ageDiv) return;
+  
+  // Only makes sense for HTTP(S) URLs
+  if (!isLikelyHttpUrl(url)) {
+    ageDiv.textContent = "";
+    ageDiv.style.color = "";
+    return;
+  }
+
+  try {
+    // HEAD is lighter than GET; NOAA should expose Last-Modified as a simple header
+    const resp = await fetch(url, { method: "HEAD" });
+
+    if (!resp.ok) {
+      ageDiv.textContent = `Image metadata not available (HTTP ${resp.status}).`;
+      return;
+    }
+
+    const lastModified = resp.headers.get("Last-Modified");
+    if (!lastModified) {
+      ageDiv.textContent = "Image timestamp not available.";
+      return;
+    }
+
+    const lmDate = new Date(lastModified);
+    if (isNaN(lmDate.getTime())) {
+      ageDiv.textContent = `Image timestamp could not be parsed: ${lastModified}`;
+      return;
+    }
+
+    const now = Date.now();
+    const ageMs = now - lmDate.getTime();
+    const ageHours = ageMs / (1000 * 60 * 60);
+
+    const wholeHours = Math.floor(ageHours);
+    const minutes = Math.round((ageHours - wholeHours) * 60);
+
+    const ageText =
+      wholeHours > 0 ? `${wholeHours}h ${minutes}m ago` : `${minutes}m ago`;
+
+    const warning =
+      ageHours > 12
+        ? "⚠️"
+        : "✓";
+
+    const lmStr = lmDate.toUTCString();
+
+    ageDiv.textContent = `Last updated: ${lmStr} (${ageText}). ${warning}`;
+    if (ageHours > 12) {
+      ageDiv.style.color = "red";
+    } else {
+      ageDiv.style.color = "green";
+    }
+  } catch (err) {
+    console.error("Failed to fetch image age", err);
+    ageDiv.textContent = "Could not determine image age.";
+    ageDiv.style.color = "red";
+  }
+}
+
+// ---------- Wiring UI ----------
+
+
+// 1) Preview: show thumbnail and update URL box according to hi/low
+function wireSourceAutoPreview() {
+  const select = document.getElementById("source") as HTMLSelectElement | null;
+  if (!select) return;
+
+  select.addEventListener("change", () => {
+    const src = getSelectedSource();
+    if (!src) return;
+
+    const img = document.getElementById("preview") as HTMLImageElement | null;
+    if (!img) return;
+
+    // Thumbnail for preview
+    const previewUrl = buildPreviewUrl(src);
+    img.src = previewUrl;
+
+    // High/low choice for wallpaper URL
+    const quality = getResolutionSelection();
+    const wallpaperUrl = buildWallpaperUrl(src, quality);
+
+    const urlInput = document.getElementById(
+      "wallpaper-url",
+    ) as HTMLInputElement | null;
+    if (urlInput) {
+      urlInput.value = wallpaperUrl;
+    }
+
+    // Update age indicator based on wallpaper URL
+    updateImageFreshness(wallpaperUrl);
+  });
+}
+
+// 2) Optional: Set wallpaper from local path (if controls exist)
+function wireSetWallpaperFromPath() {
+  const button = document.getElementById("set-wallpaper") as HTMLButtonElement | null;
+  const pathInput = document.getElementById(
+    "wallpaper-path",
+  ) as HTMLInputElement | null;
+
+  // If those inputs aren't in the HTML, just silently skip
+  if (!button || !pathInput) return;
+
+  button.addEventListener("click", async () => {
+    const path = pathInput.value.trim();
+    if (!path) {
+      alert("Enter a local image path first.");
+      return;
+    }
+
+    try {
+      await invoke("set_wallpaper", { path });
+      alert(`Wallpaper set from local file:\n${path}`);
+    } catch (e: any) {
+      console.error(e);
+      alert(`Failed to set wallpaper: ${String(e)}`);
+    }
+  });
+}
+function wireMultiStepSelector() {
+  const areaSelect = document.getElementById(
+    "area-select",
+  ) as HTMLSelectElement | null;
+  const coverageSelect = document.getElementById(
+    "coverage-select",
+  ) as HTMLSelectElement | null;
+  const regionSelect = document.getElementById(
+    "region-select",
+  ) as HTMLSelectElement | null;
+
+  const mainSourceSelect = document.getElementById(
+    "source",
+  ) as HTMLSelectElement | null;
+
+  if (!areaSelect || !coverageSelect || !regionSelect || !mainSourceSelect) {
+    return;
+  }
+
+  // --- populate AREA options ---
+  areaSelect.innerHTML = '<option value="">Select area...</option>';
+  (["west", "east", "solar"] as AreaId[]).forEach((areaId) => {
+    // Only show areas that have at least one source
+    const areaGroups = groupedSources[areaId];
+    const hasAny =
+      areaGroups.global.length ||
+      areaGroups.continental.length ||
+      areaGroups.regional.length;
+    if (!hasAny) return;
+
+    const opt = document.createElement("option");
+    opt.value = areaId;
+    opt.textContent = AREA_LABELS[areaId];
+    areaSelect.appendChild(opt);
+  });
+
+  coverageSelect.innerHTML = '<option value="">Select coverage...</option>';
+  coverageSelect.disabled = true;
+  regionSelect.innerHTML = '<option value="">Select region...</option>';
+  regionSelect.disabled = true;
+
+  // --- area change: populate coverage ---
+  areaSelect.addEventListener("change", () => {
+    const area = areaSelect.value as AreaId | "";
+    coverageSelect.innerHTML = '<option value="">Select coverage...</option>';
+    regionSelect.innerHTML = '<option value="">Select region...</option>';
+    regionSelect.disabled = true;
+
+    if (!area) {
+      coverageSelect.disabled = true;
+      return;
+    }
+
+    const areaGroups = groupedSources[area];
+    (["global", "continental", "regional"] as CoverageId[]).forEach((covId) => {
+      const list = areaGroups[covId];
+      if (!list.length) return;
+      const opt = document.createElement("option");
+      opt.value = covId;
+      opt.textContent = COVERAGE_LABELS[covId];
+      coverageSelect.appendChild(opt);
+    });
+
+    coverageSelect.disabled = false;
+  });
+
+  // --- coverage change: populate regions ---
+  coverageSelect.addEventListener("change", () => {
+    const area = areaSelect.value as AreaId | "";
+    const cov = coverageSelect.value as CoverageId | "";
+    regionSelect.innerHTML = '<option value="">Select region...</option>';
+
+    if (!area || !cov) {
+      regionSelect.disabled = true;
+      return;
+    }
+
+    const list = groupedSources[area][cov];
+    for (const src of list) {
+      const opt = document.createElement("option");
+      opt.value = src.id;
+      opt.textContent = src.region || src.name;
+      regionSelect.appendChild(opt);
+    }
+
+    regionSelect.disabled = !list.length;
+  });
+
+    // --- region change: pick source + trigger your existing logic ---
+  regionSelect.addEventListener("change", () => {
+    const sourceId = regionSelect.value;
+    if (!sourceId || !currentConfig) return;
+
+    // Find the full ImageSource from the config
+    const src = currentConfig.sources.find((s) => s.id === sourceId);
+    if (!src) return;
+
+    // Ensure the option exists in the main "Source" dropdown.
+    // This lets us use non-favorite sources selected via the advanced selector.
+    let opt = mainSourceSelect.querySelector(
+      `option[value="${sourceId}"]`,
+    ) as HTMLOptionElement | null;
+
+    if (!opt) {
+      opt = document.createElement("option");
+      opt.value = sourceId;
+      const baseLabel = makeSourceLabel(src);
+      opt.textContent = baseLabel;
+      (opt as any).dataset.label = baseLabel;
+      mainSourceSelect.appendChild(opt);
+    }
+
+    // Select it in the main dropdown
+    mainSourceSelect.value = sourceId;
+
+    // Trigger your existing 'change' handler on #source
+    const evt = new Event("change", { bubbles: true });
+    mainSourceSelect.dispatchEvent(evt);
+  });
+}
+
+// 4) Download URL → Set as Wallpaper
+function wireDownloadSetWallpaper() {
+  const btn = document.getElementById(
+    "download-set-wallpaper",
+  ) as HTMLButtonElement | null;
+  const urlInput = document.getElementById(
+    "wallpaper-url",
+  ) as HTMLInputElement | null;
+
+  if (!btn || !urlInput) return;
+
+  btn.addEventListener("click", async () => {
+    const statusId = "download-status";
+    let text = urlInput.value.trim();
+
+    // If no manual text, build from selected source + hi/low
+    if (!text) {
+      const src = getSelectedSource();
+      if (!src) {
+        setText(statusId, "Please enter a URL/local path or select a source.");
+        return;
+      }
+      const quality = getResolutionSelection();
+      const url = buildWallpaperUrl(src, quality);
+      text = url;
+      urlInput.value = url; // mirror into textbox
+    }
+
+    // Case 1: remote HTTP(S) URL → use download_image_and_set_wallpaper
+    if (isLikelyHttpUrl(text)) {
+      const url = text;
+      setText(statusId, "Downloading image and setting wallpaper...");
+
+      try {
+        const path = await invoke<string>("download_image_and_set_wallpaper", {
+          url,
+        });
+        setText(statusId, `Success! Wallpaper set from: ${path}`);
+        // Now that the user has manually applied a wallpaper,
+        // if auto-update is enabled, schedule periodic updates from here.
+        if (isAutoRefreshing) {
+          scheduleAutoRefreshIfPossible();
+        }     
+      } catch (e: any) {
+        console.error(e);
+        setText(statusId, `Failed: ${String(e)}`);
+      }
+      return;
+    }
+
+    // Case 2: anything else → treat as local file path
+    const path = normalizeFileUrlToPath(text);
+    setText(statusId, "Setting wallpaper from local file...");
+
+    try {
+      await invoke("set_wallpaper", { path });
+      setText(statusId, `Success! Wallpaper set from local file: ${path}`);
+    } catch (e: any) {
+      console.error(e);
+      setText(statusId, `Failed to set local wallpaper: ${String(e)}`);
+    }
+  });
+}
+
+// 5) Auto refresh: uses selected source + hi/low toggle 
+function updateAutoRefreshButtonLabel() {
+  const btn = document.getElementById(
+    "auto-refresh-toggle",
+  ) as HTMLButtonElement | null;
+  if (!btn) return;
+
+  btn.textContent = isAutoRefreshing
+    ? "Turn auto-update off"
+    : "Turn auto-update on";
+}
+
+function scheduleAutoRefreshIfPossible() {
+  const minutesInput = document.getElementById(
+    "refresh-minutes",
+  ) as HTMLInputElement | null;
+  if (!minutesInput) return;
+
+  const src = getSelectedSource();
+  if (!src) {
+    setText(REFRESH_STATUS_ID, "Select a source to start auto-update.");
+    return;
+  }
+
+  const quality = getResolutionSelection();
+
+  const minutesRaw = parseFloat(minutesInput.value || "");
+  const minutes =
+    !isNaN(minutesRaw) && minutesRaw > 0
+      ? minutesRaw
+      : src.default_refresh_minutes || 10;
+  const intervalMs = minutes * 60 * 1000;
+
+  if (refreshTimerId !== null) {
+    window.clearInterval(refreshTimerId);
+    refreshTimerId = null;
+  }
+
+  refreshTimerId = window.setInterval(async () => {
+    try {
+      const url = buildWallpaperUrl(src, quality);
+      const path = await invoke<string>("download_image_and_set_wallpaper", {
+        url,
+      });
+      setText(
+        REFRESH_STATUS_ID,
+        `Auto-update (${quality}) every ${minutes} min. Last: ${path}`,
+      );
+      if (isLikelyHttpUrl(url)) {
+        await updateImageFreshness(url);
+      }
+    } catch (e: any) {
+      console.error(e);
+      setText(REFRESH_STATUS_ID, `Auto-update failed: ${String(e)}`);
+    }
+  }, intervalMs);
+
+  setText(
+    REFRESH_STATUS_ID,
+    `Auto-update (${quality}) every ${minutes} min. Next update in ${minutes} min.`,
+  );
+}
+
+function wireAutoRefreshToggle() {
+  const btn = document.getElementById(
+    "auto-refresh-toggle",
+  ) as HTMLButtonElement | null;
+  const minutesInput = document.getElementById(
+    "refresh-minutes",
+  ) as HTMLInputElement | null;
+  if (!btn || !minutesInput) return;
+
+  // Default to 10 minutes if empty
+  if (!minutesInput.value) {
+    minutesInput.value = "10";
+  }
+
+  updateAutoRefreshButtonLabel();
+
+  // Auto-update is logically ON by default; we'll start it once a source is chosen
+  setText(REFRESH_STATUS_ID, "Select a source to start auto-update.");
+
+  btn.addEventListener("click", () => {
+    if (isAutoRefreshing) {
+      // Turning OFF
+      if (refreshTimerId !== null) {
+        window.clearInterval(refreshTimerId);
+        refreshTimerId = null;
+      }
+      isAutoRefreshing = false;
+      updateAutoRefreshButtonLabel();
+      setText(REFRESH_STATUS_ID, "Auto-update is off.");
+    } else {
+      // Turning ON
+      isAutoRefreshing = true;
+      updateAutoRefreshButtonLabel();
+      scheduleAutoRefreshIfPossible();
+    }
+  });
+
+  // If the user changes the interval while auto-update is on,
+  // reschedule with the new minutes value.
+  minutesInput.addEventListener("change", () => {
+    if (!isAutoRefreshing) return;
+    scheduleAutoRefreshIfPossible();
+  });
+}
+
+function wireStartupToggle() {
+  const checkbox = document.getElementById(
+    "startup-checkbox",
+  ) as HTMLInputElement | null;
+  const status = document.getElementById(
+    "startup-status",
+  ) as HTMLDivElement | null;
+
+  if (!checkbox || !status) return;
+
+  checkbox.addEventListener("change", async () => {
+    const enabled = checkbox.checked;
+    status.textContent = enabled
+      ? "Enabling run on startup..."
+      : "Disabling run on startup...";
+
+    try {
+      await invoke("set_run_on_startup", { enabled });
+      status.textContent = enabled
+        ? "Will run when Windows starts."
+        : "Won't run automatically on startup.";
+    } catch (e: any) {
+      console.error(e);
+      status.textContent = `Failed to update startup setting: ${String(e)}`;
+    }
+  });
+}
+
+// ---------- Bootstrap ----------
+
+async function bootstrap() {
+  await loadSourcesConfig();
+  wireStartupToggle();
+
+  wireSourceAutoPreview();
+  wireMultiStepSelector(); 
+  wireSetWallpaperFromPath();
+  wireDownloadSetWallpaper();
+  wireAutoRefreshToggle();
+}
+
+bootstrap().catch((e) => console.error("Bootstrap error:", e));

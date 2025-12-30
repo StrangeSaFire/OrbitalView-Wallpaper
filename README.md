@@ -40,7 +40,7 @@ OrbitalView-Wallpaper/
 
 ## 📌 Installation (Development)
 ```sh
-git clone https://github.com/YOURNAME/orbitalview-wallpaper
+git clone git clone https://github.com/StrangeSaFire/OrbitalView-Wallpaper
 cd orbitalview-wallpaper
 npm install
 npm run tauri dev
@@ -110,26 +110,7 @@ This program was developed using Tauri with the
 assistance of artificial intelligence. 
 
 ## 📜 License
-MIT License
 
-Copyright (c) 2025 [Your Name]
+OrbitalView Wallpaper is released under the [MIT License](./LICENSE).
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software. The names "OrbitalView" and "OrbitalView Wallpaper" may not be used for commercial promotion of derivative works without explicit permission.
-
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
+The names "OrbitalView" and "OrbitalView Wallpaper" may not be used for commercial promotion of derivative works without explicit permission.

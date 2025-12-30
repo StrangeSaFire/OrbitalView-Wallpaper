@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>OrbitalView Wallpaper</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #050814;
+        --bg-elevated: #0c1020;
+        --bg-soft: #101425;
+        --border-subtle: #262c3f;
+        --accent: #4ea3ff;
+        --accent-soft: rgba(78, 163, 255, 0.15);
+        --accent-strong: #7fd1ff;
+        --text: #e7ecff;
+        --text-soft: #a6b0d8;
+        --danger: #ff6b81;
+        --success: #53d18b;
+        --shadow-soft: 0 18px 40px rgba(0, 0, 0, 0.4);
+        --radius-lg: 16px;
+        --radius-full: 999px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: radial-gradient(circle at top, #172038 0, #050814 55%);
+        color: var(--text);
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        font-weight: 600;
+      }
+
+      h1 {
+        font-size: 1.6rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      h2 {
+        font-size: 1.05rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--text-soft);
+      }
+
+      h3 {
+        font-size: 0.95rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-soft);
+      }
+
+      p {
+        margin: 0.25rem 0;
+      }
+
+      .app-shell {
+        max-width: 1180px;
+        margin: 0 auto;
+        background: linear-gradient(135deg, #070a14, #080c18);
+        border-radius: 24px;
+        border: 1px solid rgba(151, 181, 255, 0.16);
+        box-shadow: var(--shadow-soft);
+        padding: 18px 20px 22px;
+      }
+
+      .app-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .app-title-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .app-subtitle {
+        font-size: 0.85rem;
+        color: var(--text-soft);
+      }
+
+      .app-pill {
+        padding: 4px 10px;
+        border-radius: var(--radius-full);
+        border: 1px solid rgba(78, 163, 255, 0.35);
+        background: radial-gradient(
+          circle at top left,
+          var(--accent-soft),
+          transparent 55%
+        );
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--accent-strong);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .app-pill span {
+        font-size: 0.85rem;
+      }
+
+      .main-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(260px, 320px);
+        gap: 22px;
+        align-items: flex-start;
+      }
+
+      @media (max-width: 900px) {
+        .main-layout {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      .card {
+        background: radial-gradient(circle at top left, #171d34 0, #090d1a 55%);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        padding: 14px 14px 16px;
+      }
+
+      .card + .card {
+        margin-top: 10px;
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .card-header-right {
+        font-size: 0.75rem;
+        color: var(--text-soft);
+      }
+
+      label {
+        font-size: 0.8rem;
+        color: var(--text-soft);
+      }
+
+      select,
+      input[type="text"],
+      input[type="number"] {
+        width: 100%;
+        padding: 7px 9px;
+        border-radius: 8px;
+        border: 1px solid var(--border-subtle);
+        background: rgba(8, 12, 26, 0.92);
+        color: var(--text);
+        font-size: 0.85rem;
+        outline: none;
+      }
+
+      select:focus,
+      input[type="text"]:focus,
+      input[type="number"]:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px rgba(78, 163, 255, 0.3);
+      }
+
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .row-inline {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .resolution-toggle {
+        display: inline-flex;
+        gap: 10px;
+        font-size: 0.8rem;
+        color: var(--text-soft);
+      }
+
+      .resolution-toggle input {
+        margin-right: 4px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        border-radius: var(--radius-full);
+        font-size: 0.7rem;
+        background: rgba(9, 17, 35, 0.95);
+        border: 1px solid rgba(71, 109, 184, 0.6);
+        color: var(--text-soft);
+      }
+
+      .status-text {
+        font-size: 0.8rem;
+        margin-top: 4px;
+        color: var(--text-soft);
+      }
+
+      .status-text strong {
+        color: var(--accent-strong);
+        font-weight: 500;
+      }
+
+      .status-text.danger {
+        color: var(--danger);
+      }
+
+      .status-text.success {
+        color: var(--success);
+      }
+
+      button {
+        border-radius: 999px;
+        border: 1px solid rgba(78, 163, 255, 0.6);
+        background: radial-gradient(
+          circle at top left,
+          var(--accent-soft),
+          #11162a
+        );
+        color: var(--text);
+        font-size: 0.85rem;
+        padding: 7px 14px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition:
+          background 0.15s ease,
+          transform 0.05s ease,
+          box-shadow 0.15s ease,
+          border-color 0.15s ease;
+      }
+
+      button:hover {
+        background: radial-gradient(
+          circle at top left,
+          var(--accent-soft),
+          #1a2340
+        );
+        transform: translateY(-0.5px);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+        border-color: var(--accent-strong);
+      }
+
+      button:active {
+        transform: translateY(0);
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+      }
+
+      button.secondary {
+        border-color: rgba(81, 102, 141, 0.8);
+        background: linear-gradient(135deg, #111623, #0b0f1b);
+        color: var(--text-soft);
+      }
+
+      button.secondary:hover {
+        border-color: rgba(111, 136, 181, 0.9);
+      }
+
+      .preview-card {
+        background: radial-gradient(circle at top left, #131c31 0, #050814 55%);
+      }
+
+      .preview-frame {
+        width: 100%;
+        max-width: 300px;
+        aspect-ratio: 1 / 1;
+        border-radius: 18px;
+        border: 1px solid rgba(76, 99, 155, 0.7);
+        background: radial-gradient(circle at center, #111728 0, #050814 65%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+
+      .preview-inner-border {
+        width: calc(100% - 10px);
+        height: calc(100% - 10px);
+        border-radius: 14px;
+        border: 1px solid rgba(171, 197, 255, 0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+
+      #preview {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+
+      .preview-footer {
+        margin-top: 10px;
+        font-size: 0.78rem;
+        color: var(--text-soft);
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .preview-footer span {
+        opacity: 0.9;
+      }
+
+      .section-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+
+      .section-title-row small {
+        font-size: 0.75rem;
+        color: var(--text-soft);
+      }
+
+      .inline-number {
+        width: 70px;
+      }
+
+      .checkbox-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.85rem;
+        color: var(--text-soft);
+      }
+
+      .checkbox-row input {
+        margin: 0;
+      }
+
+      .subtle-note {
+        font-size: 0.75rem;
+        color: var(--text-soft);
+        opacity: 0.9;
+      }
+
+      .catalog-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- Header -->
+      <header class="app-header">
+        <div class="app-title-block">
+          <h1>OrbitalView Wallpaper</h1>
+          <div class="app-subtitle">
+            Live GOES imagery as your Windows wallpaper &mdash; favorites on top,
+            full catalog below.
+          </div>
+        </div>
+        <div class="app-pill">
+          <span>Auto Update</span>
+          <span>●</span>
+          <span>On</span>
+        </div>
+      </header>
+
+      <div class="main-layout">
+        <!-- LEFT COLUMN: selection & controls -->
+        <div class="stack">
+          <!-- Source selection -->
+          <section class="card">
+            <div class="card-header">
+              <h2>Source Selection</h2>
+              <div class="card-header-right">
+                <span class="subtle-note"
+                  >Favorites in dropdown &bull; full list below</span
+                >
+              </div>
+            </div>
+
+            <div class="stack" style="gap: 10px;">
+              <div>
+                <label for="source">Source</label>
+                <select id="source">
+                  <option value="" disabled selected>Select source...</option>
+                </select>
+              </div>
+
+              <div class="row" style="justify-content: space-between;">
+                <div class="resolution-toggle">
+                  <label class="row-inline">
+                    <input type="radio" name="resolution" value="high" checked />
+                    High resolution
+                  </label>
+                  <label class="row-inline">
+                    <input type="radio" name="resolution" value="low" />
+                    Low resolution
+                  </label>
+                </div>
+                <div class="pill">
+                  <span>⟳</span>
+                  <span>Preview only until you apply</span>
+                </div>
+              </div>
+
+              <div id="image-age" class="status-text">
+                <!-- Last updated info injected here -->
+              </div>
+            </div>
+          </section>
+
+          <!-- Auto-update -->
+          <section class="card">
+            <div class="section-title-row">
+              <h2>Auto-Update</h2>
+              <small>Keeps wallpaper synced to latest frame</small>
+            </div>
+
+            <div class="stack">
+              <div class="row">
+                <label for="refresh-minutes">Interval</label>
+                <input
+                  id="refresh-minutes"
+                  type="number"
+                  min="1"
+                  step="1"
+                  class="inline-number"
+                />
+                <span class="subtle-note">minutes</span>
+              </div>
+
+              <button id="auto-refresh-toggle">
+                ⏱️ Turn auto-update on
+              </button>
+
+              <div id="refresh-status" class="status-text">
+                <!-- Auto-refresh status -->
+              </div>
+            </div>
+          </section>
+
+          <!-- Manual URL / local path + startup toggle -->
+          <section class="card">
+            <div class="section-title-row">
+              <h2>Manual Image</h2>
+              <small>URL or local file path</small>
+            </div>
+
+            <div class="stack">
+              <div>
+                <label for="wallpaper-url">URL or local path</label>
+                <input
+                  id="wallpaper-url"
+                  type="text"
+                  placeholder="https://example.com/image.jpg  or  C:\Wallpapers\image.jpg"
+                />
+                <p class="subtle-note">
+                  Leave empty to use the selected source and resolution.
+                </p>
+              </div>
+
+              <div class="row" style="justify-content: space-between; gap: 10px;">
+                <button id="download-set-wallpaper">
+                  🎨 Download &amp; Set Wallpaper
+                </button>
+              </div>
+
+              <!-- Startup checkbox moved here -->
+              <label class="checkbox-row" style="margin-top: 4px;">
+                <input type="checkbox" id="startup-checkbox" />
+                Run OrbitalView Wallpaper when Windows starts
+              </label>
+              <div id="startup-status" class="status-text">
+                <!-- Startup status text -->
+              </div>
+
+              <div id="download-status" class="status-text">
+                <!-- Download + apply status -->
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- RIGHT COLUMN: preview + catalog -->
+        <div class="stack">
+          <!-- Preview -->
+          <section class="card preview-card">
+            <div class="card-header">
+              <h2>Preview</h2>
+              <div class="card-header-right">
+                <span class="subtle-note">Matches what will be applied</span>
+              </div>
+            </div>
+
+            <div
+              style="
+                display: flex;
+                justify-content: center;
+                align-items: center;
+              "
+            >
+              <div class="preview-frame">
+                <div class="preview-inner-border">
+                  <img id="preview" alt="Image preview" />
+                </div>
+              </div>
+            </div>
+
+            <div class="preview-footer">
+              <span>🔍 Uses thumbnail for faster preview</span>
+              <span>🖥️ Wallpaper uses selected resolution</span>
+            </div>
+          </section>
+
+          <!-- Full catalog (stacked vertically) -->
+          <section class="card" style="margin-top: 14px;">
+            <div class="card-header">
+              <h2>Browse Full Catalog</h2>
+              <div class="card-header-right">
+                <span class="subtle-note">
+                  Area → Coverage → Region. Picking a region also selects it in
+                  the Source dropdown.
+                </span>
+              </div>
+            </div>
+
+            <div class="catalog-stack">
+              <div>
+                <label for="area-select">Area</label>
+                <select id="area-select">
+                  <option value="">Select area...</option>
+                </select>
+              </div>
+
+              <div>
+                <label for="coverage-select">Coverage</label>
+                <select id="coverage-select" disabled>
+                  <option value="">Select coverage...</option>
+                </select>
+              </div>
+
+              <div>
+                <label for="region-select">Region</label>
+                <select id="region-select" disabled>
+                  <option value="">Select region...</option>
+                </select>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tauri/Vite entrypoint -->
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
